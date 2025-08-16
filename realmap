@@ -477,8 +477,12 @@ class RoadNetworkSelector:
         # 显示完整的距离矩阵和分析
         self.display_complete_distance_analysis()
 
+        # 计算穿越次数矩阵
+        print("\n正在计算穿越次数矩阵...")
+        self.calculate_crossing_distances()
+
         # 自动生成可视化
-        print("\n正在生成距离矩阵可视化...")
+        print("\n正在生成距离矩阵和穿越次数矩阵可视化...")
         self.visualize_distance_matrix()
 
     def display_complete_distance_analysis(self):
@@ -563,17 +567,17 @@ class RoadNetworkSelector:
                 print(f"  └─ ❌ 无需求点可达")
 
     def visualize_distance_matrix(self):
-        """可视化距离矩阵"""
+        """可视化距离矩阵和穿越次数矩阵"""
 
         try:
             # 创建热力图
             fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 8))
 
-            # 1. 距离矩阵热力图
+            # 1. 距离矩阵热力图 (左图)
             matrix_for_heatmap = self.distance_matrix.copy()
             matrix_for_heatmap = matrix_for_heatmap.replace(float('inf'), np.nan)
 
-            im = ax1.imshow(matrix_for_heatmap.values, cmap='YlOrRd', aspect='auto')
+            im1 = ax1.imshow(matrix_for_heatmap.values, cmap='YlOrRd', aspect='auto')
 
             # 设置坐标轴标签
             ax1.set_xticks(range(len(self.distance_matrix.columns)))
@@ -609,47 +613,84 @@ class RoadNetworkSelector:
             ax1.set_title('Matrix of distance from NP to GP (m)', fontsize=14, pad=20)
 
             # 添加颜色条
-            cbar = plt.colorbar(im, ax=ax1)
-            cbar.set_label('Distance (m)', rotation=270, labelpad=20)
+            cbar1 = plt.colorbar(im1, ax=ax1)
+            cbar1.set_label('Distance (m)', rotation=270, labelpad=20)
 
-            # 2. 地图可视化
-            original_nodes, original_edges = ox.graph_to_gdfs(self.original_G)
+            # 2. 穿越次数矩阵热力图 (右图)
+            if hasattr(self, 'crossing_matrix') and self.crossing_matrix is not None:
+                # 创建与距离矩阵兼容的穿越次数矩阵
+                crossing_for_heatmap = self.create_compatible_crossing_matrix()
+                crossing_for_heatmap = crossing_for_heatmap.replace(float('inf'), np.nan)
 
-            # 绘制完整路网背景
-            original_edges.plot(ax=ax2, color='lightgray', linewidth=0.5, alpha=0.3)
+                im2 = ax2.imshow(crossing_for_heatmap.values, cmap='Blues', aspect='auto')
 
-            # 绘制需求点
-            colors = ['red', 'blue', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan']
-            for i, (centroid_id, centroid_geom) in enumerate(self.region_centroid_nodes):
-                color = colors[i % len(colors)]
-                ax2.scatter(centroid_geom.x, centroid_geom.y,
-                            marker='^', s=200, color=color,
-                            edgecolor='black', linewidth=2,
-                            label=f'NP{i + 1}')
-                ax2.text(centroid_geom.x + 50, centroid_geom.y + 50, f'NP{i + 1}',
-                         fontsize=10, color=color, weight='bold')
+                # 设置坐标轴标签 (与距离矩阵相同)
+                ax2.set_xticks(range(len(crossing_for_heatmap.columns)))
+                ax2.set_yticks(range(len(crossing_for_heatmap.index)))
+                ax2.set_xticklabels(x_labels, rotation=45, ha='right')
+                ax2.set_yticklabels(y_labels)
 
-            # 绘制集合点
-            for gp in self.gathering_points:
-                if gp in original_nodes.index:
-                    gp_geom = original_nodes.loc[gp].geometry
-                    capacity = self.gathering_point_capacities.get(gp, "?")
-                    ax2.scatter(gp_geom.x, gp_geom.y,
-                                marker='s', s=200, color='green',
-                                edgecolor='darkgreen', linewidth=2)
-                    ax2.text(gp_geom.x + 50, gp_geom.y + 50,
-                             f'GP{gp}\nCapacity:{capacity}',
-                             fontsize=9, color='darkgreen', weight='bold')
-            ax2.set_title('NPs and GPs', fontsize=14)
-            ax2.set_xlabel('X (m)')
-            ax2.set_ylabel('Y (m)')
+                # 在每个格子中标注穿越次数值
+                for i in range(len(crossing_for_heatmap.index)):
+                    for j in range(len(crossing_for_heatmap.columns)):
+                        value = crossing_for_heatmap.iloc[i, j]
+                        if value != float('inf') and not np.isnan(value):
+                            text = f"{int(value)}"
+                            ax2.text(j, i, text, ha="center", va="center",
+                                     color="black" if value < crossing_for_heatmap.values[
+                                         ~np.isnan(crossing_for_heatmap.values)].mean() else "white",
+                                     fontsize=12, weight='bold')
+                        else:
+                            ax2.text(j, i, "不可达", ha="center", va="center",
+                                     color="gray", fontsize=8)
+
+                ax2.set_title('Matrix of crossing count from NP to GP', fontsize=14, pad=20)
+
+                # 添加颜色条
+                cbar2 = plt.colorbar(im2, ax=ax2)
+                cbar2.set_label('Crossing Count', rotation=270, labelpad=20)
+            else:
+                # 如果穿越次数矩阵不存在，显示提示信息
+                ax2.text(0.5, 0.5, 'Crossing matrix not available\nPlease ensure arterial roads are selected',
+                         ha='center', va='center', transform=ax2.transAxes,
+                         fontsize=12, bbox=dict(boxstyle='round', facecolor='lightgray'))
+                ax2.set_title('Crossing Count Matrix', fontsize=14, pad=20)
+                ax2.set_xticks([])
+                ax2.set_yticks([])
+
             plt.tight_layout()
             plt.show()
-            print("✅ 距离矩阵可视化完成！")
+            print("✅ 距离矩阵和穿越次数矩阵可视化完成！")
         except Exception as e:
             print(f"可视化失败: {e}")
             import traceback
             traceback.print_exc()
+
+    def create_compatible_crossing_matrix(self):
+        """创建与距离矩阵兼容的穿越次数矩阵"""
+        
+        if not hasattr(self, 'crossing_matrix') or self.crossing_matrix is None:
+            return None
+        
+        # 创建兼容矩阵，使用与距离矩阵相同的行列索引
+        compatible_matrix = pd.DataFrame(
+            index=self.distance_matrix.index,  # 需求点节点ID
+            columns=self.distance_matrix.columns,  # 集合点节点ID
+            dtype=float
+        )
+        compatible_matrix[:] = float('inf')
+        
+        # 映射穿越次数矩阵的数据到兼容矩阵
+        for i, (centroid_id, _) in enumerate(self.region_centroid_nodes):
+            demand_point_label = f"NP{i + 1}"
+            if demand_point_label in self.crossing_matrix.index:
+                for gp_id in self.gathering_points:
+                    gathering_point_label = f"GP{gp_id}"
+                    if gathering_point_label in self.crossing_matrix.columns:
+                        crossing_value = self.crossing_matrix.loc[demand_point_label, gathering_point_label]
+                        compatible_matrix.loc[centroid_id, gp_id] = crossing_value
+        
+        return compatible_matrix
 
     def finalize_selection(self, event):
         if len(self.selected_nodes) == 0:
