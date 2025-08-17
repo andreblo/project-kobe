@@ -21,6 +21,7 @@ class RoadNetworkSelector:
         for key, value in self.original_G.graph.items():
             self.selected_G.graph[key] = value
         self.selected_nodes = set()
+        self.crossing_matrix = None
         self.selected_edges = set()
         self.arterial_edges = set()
         self.gathering_points = set()
@@ -563,93 +564,125 @@ class RoadNetworkSelector:
                 print(f"  └─ ❌ 无需求点可达")
 
     def visualize_distance_matrix(self):
-        """可视化距离矩阵"""
+        """可视化距离矩阵和穿越次数矩阵"""
+        if self.distance_matrix is None:
+            print("距离矩阵为空，无法可视化")
+            return
 
-        try:
-            # 创建热力图
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 8))
+        # 将DataFrame转换为numpy数组
+        if hasattr(self.distance_matrix, 'values'):
+            # 如果是DataFrame，转换为numpy数组
+            distance_array = self.distance_matrix.values
+        else:
+            # 如果已经是numpy数组
+            distance_array = self.distance_matrix
 
-            # 1. 距离矩阵热力图
-            matrix_for_heatmap = self.distance_matrix.copy()
-            matrix_for_heatmap = matrix_for_heatmap.replace(float('inf'), np.nan)
+        print(f"距离矩阵形状: {distance_array.shape}")
 
-            im = ax1.imshow(matrix_for_heatmap.values, cmap='YlOrRd', aspect='auto')
+        # 计算穿越次数矩阵
+        crossing_matrix = self.calculate_crossing_matrix()
 
-            # 设置坐标轴标签
-            ax1.set_xticks(range(len(self.distance_matrix.columns)))
-            ax1.set_yticks(range(len(self.distance_matrix.index)))
+        # 创建子图
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
 
-            # X轴标签：集合点
-            x_labels = []
-            for gp in self.distance_matrix.columns:
-                capacity = self.gathering_point_capacities.get(gp, "?")
-                x_labels.append(f"GP{gp}")
-            ax1.set_xticklabels(x_labels, rotation=45, ha='right')
+        # 左图：距离矩阵热力图
+        im1 = ax1.imshow(distance_array, cmap='viridis', aspect='auto')
+        ax1.set_title('距离矩阵 (米)', fontsize=14, fontweight='bold')
+        ax1.set_xlabel('集合点', fontsize=12)
+        ax1.set_ylabel('需求点', fontsize=12)
 
-            # Y轴标签：需求点
-            y_labels = []
-            for i, centroid_id in enumerate(self.distance_matrix.index):
-                y_labels.append(f"NP{i + 1}")
-            ax1.set_yticklabels(y_labels)
+        # 获取矩阵维度
+        num_rows, num_cols = distance_array.shape
 
-            # 在每个格子中标注距离值
-            for i in range(len(self.distance_matrix.index)):
-                for j in range(len(self.distance_matrix.columns)):
-                    value = self.distance_matrix.iloc[i, j]
-                    if value != float('inf'):
-                        text = f"{value:.0f}m"
-                        ax1.text(j, i, text, ha="center", va="center",
-                                 color="black" if value < matrix_for_heatmap.values[
-                                     ~np.isnan(matrix_for_heatmap.values)].mean() else "white",
-                                 fontsize=10, weight='bold')
+        # 设置刻度标签
+        ax1.set_xticks(range(num_cols))
+        ax1.set_yticks(range(num_rows))
+        ax1.set_xticklabels([f'G{i + 1}' for i in range(num_cols)])
+        ax1.set_yticklabels([f'D{i + 1}' for i in range(num_rows)])
+
+        # 在每个格子中添加数值标注
+        for i in range(num_rows):
+            for j in range(num_cols):
+                distance = distance_array[i, j]
+                if not np.isinf(distance) and not np.isnan(distance):
+                    text = f'{distance:.0f}'
+                    # 计算文本颜色（基于距离值的相对大小）
+                    valid_values = distance_array[~np.isinf(distance_array) & ~np.isnan(distance_array)]
+                    if len(valid_values) > 0:
+                        max_val = np.max(valid_values)
+                        color = 'white' if distance > max_val * 0.5 else 'black'
                     else:
-                        ax1.text(j, i, "不可达", ha="center", va="center",
-                                 color="gray", fontsize=8)
+                        color = 'black'
+                    ax1.text(j, i, text, ha='center', va='center', color=color, fontsize=8)
+                else:
+                    ax1.text(j, i, '∞', ha='center', va='center', color='red', fontsize=8)
 
-            ax1.set_title('Matrix of distance from NP to GP (m)', fontsize=14, pad=20)
+        # 添加颜色条
+        cbar1 = plt.colorbar(im1, ax=ax1, shrink=0.8)
+        cbar1.set_label('距离 (米)', fontsize=10)
+
+        # 右图：穿越次数矩阵热力图
+        if crossing_matrix is not None:
+            # 使用不同的颜色方案
+            im2 = ax2.imshow(crossing_matrix, cmap='Reds', aspect='auto')
+            ax2.set_title('穿越次数矩阵', fontsize=14, fontweight='bold')
+            ax2.set_xlabel('集合点', fontsize=12)
+            ax2.set_ylabel('需求点', fontsize=12)
+
+            # 获取穿越矩阵维度
+            cross_rows, cross_cols = crossing_matrix.shape
+
+            # 设置刻度标签
+            ax2.set_xticks(range(cross_cols))
+            ax2.set_yticks(range(cross_rows))
+            ax2.set_xticklabels([f'G{i + 1}' for i in range(cross_cols)])
+            ax2.set_yticklabels([f'D{i + 1}' for i in range(cross_rows)])
+
+            # 在每个格子中添加数值标注
+            for i in range(cross_rows):
+                for j in range(cross_cols):
+                    crossings = crossing_matrix[i, j]
+                    if crossings >= 0:
+                        max_crossings = np.max(crossing_matrix[crossing_matrix >= 0])
+                        color = 'white' if crossings > max_crossings * 0.5 else 'black'
+                        ax2.text(j, i, str(crossings), ha='center', va='center', color=color, fontsize=10,
+                                 fontweight='bold')
+                    else:
+                        ax2.text(j, i, '-', ha='center', va='center', color='gray', fontsize=10)
 
             # 添加颜色条
-            cbar = plt.colorbar(im, ax=ax1)
-            cbar.set_label('Distance (m)', rotation=270, labelpad=20)
+            cbar2 = plt.colorbar(im2, ax=ax2, shrink=0.8)
+            cbar2.set_label('穿越次数', fontsize=10)
+        else:
+            ax2.text(0.5, 0.5, '无法计算穿越次数', ha='center', va='center', transform=ax2.transAxes, fontsize=12)
+            ax2.set_title('穿越次数矩阵 (计算失败)', fontsize=14)
 
-            # 2. 地图可视化
-            original_nodes, original_edges = ox.graph_to_gdfs(self.original_G)
+        plt.tight_layout()
+        plt.show()
 
-            # 绘制完整路网背景
-            original_edges.plot(ax=ax2, color='lightgray', linewidth=0.5, alpha=0.3)
+        # 打印统计信息
+        print("\n" + "=" * 50)
+        print("矩阵统计信息:")
+        print("=" * 50)
 
-            # 绘制需求点
-            colors = ['red', 'blue', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan']
-            for i, (centroid_id, centroid_geom) in enumerate(self.region_centroid_nodes):
-                color = colors[i % len(colors)]
-                ax2.scatter(centroid_geom.x, centroid_geom.y,
-                            marker='^', s=200, color=color,
-                            edgecolor='black', linewidth=2,
-                            label=f'NP{i + 1}')
-                ax2.text(centroid_geom.x + 50, centroid_geom.y + 50, f'NP{i + 1}',
-                         fontsize=10, color=color, weight='bold')
+        # 距离矩阵统计
+        valid_distances = distance_array[~np.isinf(distance_array) & ~np.isnan(distance_array)]
+        if len(valid_distances) > 0:
+            print(f"平均距离: {np.mean(valid_distances):.2f} 米")
+            print(f"最短距离: {np.min(valid_distances):.2f} 米")
+            print(f"最长距离: {np.max(valid_distances):.2f} 米")
 
-            # 绘制集合点
-            for gp in self.gathering_points:
-                if gp in original_nodes.index:
-                    gp_geom = original_nodes.loc[gp].geometry
-                    capacity = self.gathering_point_capacities.get(gp, "?")
-                    ax2.scatter(gp_geom.x, gp_geom.y,
-                                marker='s', s=200, color='green',
-                                edgecolor='darkgreen', linewidth=2)
-                    ax2.text(gp_geom.x + 50, gp_geom.y + 50,
-                             f'GP{gp}\nCapacity:{capacity}',
-                             fontsize=9, color='darkgreen', weight='bold')
-            ax2.set_title('NPs and GPs', fontsize=14)
-            ax2.set_xlabel('X (m)')
-            ax2.set_ylabel('Y (m)')
-            plt.tight_layout()
-            plt.show()
-            print("✅ 距离矩阵可视化完成！")
-        except Exception as e:
-            print(f"可视化失败: {e}")
-            import traceback
-            traceback.print_exc()
+        # 穿越次数统计
+        if crossing_matrix is not None:
+            valid_crossings = crossing_matrix[crossing_matrix >= 0]
+            if len(valid_crossings) > 0:
+                print(f"平均穿越次数: {np.mean(valid_crossings):.2f}")
+                print(f"最少穿越次数: {np.min(valid_crossings)}")
+                print(f"最多穿越次数: {np.max(valid_crossings)}")
+
+            # 显示矩阵形状信息
+            print(f"距离矩阵维度: {distance_array.shape}")
+            print(f"穿越矩阵维度: {crossing_matrix.shape}")
 
     def finalize_selection(self, event):
         if len(self.selected_nodes) == 0:
@@ -1223,6 +1256,95 @@ class RoadNetworkSelector:
                 print(f"  └─ 无可达集结点")
 
         print("\n✅ 穿越次数矩阵计算完成！")
+
+    def calculate_crossing_matrix(self):
+        """计算需求点到集合点的穿越次数矩阵"""
+        if not self.region_centroid_nodes or not self.gathering_points:
+            print("没有需求点或集合点，无法计算穿越次数矩阵")
+            return None
+
+        # 获取干路线段
+        arterial_lines = []
+        for u, v, data in self.G.edges(data=True):
+            if data.get('highway') == 'primary' or data.get('highway') == 'trunk':
+                edge_geom = data.get('geometry')
+                if edge_geom:
+                    arterial_lines.append(edge_geom)
+
+        print(f"找到 {len(arterial_lines)} 条干路")
+
+        # 初始化穿越次数矩阵
+        num_demand = len(self.region_centroid_nodes)
+        num_gathering = len(self.gathering_points)
+        crossing_matrix = np.full((num_demand, num_gathering), -1, dtype=int)
+
+        print("开始计算穿越次数...")
+
+        for i, demand_item in enumerate(self.region_centroid_nodes):
+            # 从元组中提取坐标信息
+            if isinstance(demand_item, tuple) and len(demand_item) == 2:
+                # demand_item 格式: (node_id, Point(x, y))
+                demand_point = demand_item[1]  # 获取Point对象
+            else:
+                # 如果是其他格式，尝试从图中获取坐标
+                try:
+                    demand_point = Point(self.G.nodes[demand_item]['x'], self.G.nodes[demand_item]['y'])
+                except:
+                    print(f"无法获取需求点 {i + 1} 的坐标")
+                    continue
+
+            for j, gathering_node in enumerate(self.gathering_points):
+                # 获取集合点坐标
+                try:
+                    gathering_point = Point(self.G.nodes[gathering_node]['x'], self.G.nodes[gathering_node]['y'])
+                except:
+                    print(f"无法获取集合点 {j + 1} 的坐标")
+                    continue
+
+                # 创建直线连接
+                connection_line = LineString([demand_point, gathering_point])
+
+                # 计算穿越次数
+                crossings = self.count_crossings_for_line(connection_line, arterial_lines)
+                crossing_matrix[i, j] = crossings
+
+                print(f"需求点 {i + 1} 到集合点 {j + 1}: {crossings} 次穿越")
+
+        self.crossing_matrix = crossing_matrix
+        print("穿越次数矩阵计算完成")
+        return crossing_matrix
+
+    def count_crossings_for_line(self, line, arterial_lines):
+        """计算单条线段与干路的穿越次数"""
+        crossings = 0
+        line_start = Point(line.coords[0])
+        line_end = Point(line.coords[-1])
+
+        for arterial in arterial_lines:
+            if arterial.geom_type == 'MultiLineString':
+                sublines = list(arterial.geoms)
+            else:
+                sublines = [arterial]
+
+            for subline in sublines:
+                try:
+                    intersection = line.intersection(subline)
+                    if intersection.is_empty:
+                        continue
+
+                    if intersection.geom_type == 'Point':
+                        # 排除起点和终点的交点
+                        if not (line_start.equals(intersection) or line_end.equals(intersection)):
+                            crossings += 1
+                    elif intersection.geom_type == 'MultiPoint':
+                        for pt in intersection.geoms:
+                            if not (line_start.equals(pt) or line_end.equals(pt)):
+                                crossings += 1
+                except Exception as e:
+                    # 处理几何计算异常
+                    continue
+
+        return crossings
 
     def undo_action(self, event):
         if not self._history:
