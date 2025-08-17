@@ -587,9 +587,9 @@ class RoadNetworkSelector:
 
         # 左图：距离矩阵热力图
         im1 = ax1.imshow(distance_array, cmap='viridis', aspect='auto')
-        ax1.set_title('距离矩阵 (米)', fontsize=14, fontweight='bold')
-        ax1.set_xlabel('集合点', fontsize=12)
-        ax1.set_ylabel('需求点', fontsize=12)
+        ax1.set_title('Distance Matrix (meters)', fontsize=14, fontweight='bold')
+        ax1.set_xlabel('Gathering Points', fontsize=12)
+        ax1.set_ylabel('Demand Points', fontsize=12)
 
         # 获取矩阵维度
         num_rows, num_cols = distance_array.shape
@@ -619,15 +619,15 @@ class RoadNetworkSelector:
 
         # 添加颜色条
         cbar1 = plt.colorbar(im1, ax=ax1, shrink=0.8)
-        cbar1.set_label('距离 (米)', fontsize=10)
+        cbar1.set_label('Distance (meters)', fontsize=10)
 
         # 右图：穿越次数矩阵热力图
         if crossing_matrix is not None:
             # 使用不同的颜色方案
             im2 = ax2.imshow(crossing_matrix, cmap='Reds', aspect='auto')
-            ax2.set_title('穿越次数矩阵', fontsize=14, fontweight='bold')
-            ax2.set_xlabel('集合点', fontsize=12)
-            ax2.set_ylabel('需求点', fontsize=12)
+            ax2.set_title('Crossing Count Matrix', fontsize=14, fontweight='bold')
+            ax2.set_xlabel('Gathering Points', fontsize=12)
+            ax2.set_ylabel('Demand Points', fontsize=12)
 
             # 获取穿越矩阵维度
             cross_rows, cross_cols = crossing_matrix.shape
@@ -652,7 +652,7 @@ class RoadNetworkSelector:
 
             # 添加颜色条
             cbar2 = plt.colorbar(im2, ax=ax2, shrink=0.8)
-            cbar2.set_label('穿越次数', fontsize=10)
+            cbar2.set_label('Crossing Count', fontsize=10)
         else:
             ax2.text(0.5, 0.5, '无法计算穿越次数', ha='center', va='center', transform=ax2.transAxes, fontsize=12)
             ax2.set_title('穿越次数矩阵 (计算失败)', fontsize=14)
