@@ -26,8 +26,7 @@ class RoadNetworkSelector:
         self.arterial_edges = set()
         self.gathering_points = set()
         self.gathering_point_capacities = dict()
-
-        # 新增：Dijkstra算法相关属性
+        self.demand_quantities = {}  # 存储各需求点的疏散需求量
         self.region_centroid_nodes = []  # 存储小区形心节点（需求点）
         self.distance_matrix = None  # 完整距离矩阵：形心 × 集合点
         self.shortest_paths = {}  # 存储所有最短路径
@@ -92,10 +91,17 @@ class RoadNetworkSelector:
         self.btn_reset = Button(ax_reset, 'All reset')
         self.btn_reset.on_clicked(self.reset_selection)
 
-        # 新增：距离计算按钮
         ax_dijkstra = plt.axes([0.66, 0.03, 0.10, 0.06])
         self.btn_dijkstra = Button(ax_dijkstra, 'Calculate Distances')
         self.btn_dijkstra.on_clicked(self.calculate_all_distances)
+
+        ax_demand = plt.axes([0.27, 0.03, 0.10, 0.06])
+        self.btn_demand = Button(ax_demand, 'Input Demands')
+        self.btn_demand.on_clicked(self.input_demand_quantities)
+
+        ax_optimize = plt.axes([0.79, 0.03, 0.10, 0.06])
+        self.btn_optimize = Button(ax_optimize, 'Optimize')
+        self.btn_optimize.on_clicked(self.run_optimization)
 
     def draw_map(self, preserve_view=True):
         if preserve_view:
@@ -718,6 +724,42 @@ class RoadNetworkSelector:
             print("正在计算需求点到集结点的最少穿越次数...")
             print("=" * 50)
             self.calculate_crossing_distances()
+
+    def input_demand_quantities(self, event):
+        """手动输入各需求点的疏散需求量"""
+        if not self.region_centroid_nodes:
+            print("错误：没有发现需求点，请先完成选择以识别需求点")
+            return
+
+        print("\n" + "=" * 60)
+        print("请为每个需求点输入疏散需求量")
+        print("=" * 60)
+
+        for i, (centroid_id, centroid_geom) in enumerate(self.region_centroid_nodes):
+            print(f"\n需求点 {i + 1} (Node ID: {centroid_id})")
+            print(f"坐标: ({centroid_geom.x:.1f}, {centroid_geom.y:.1f})")
+
+            while True:
+                try:
+                    demand_str = input(f"请输入需求点 {i + 1} 的疏散需求量（正整数）: ")
+                    demand = int(demand_str)
+                    if demand > 0:
+                        self.demand_quantities[centroid_id] = demand
+                        print(f"需求点 {i + 1} 的需求量设置为: {demand}")
+                        break
+                    else:
+                        print("错误：需求量必须为正整数")
+                except ValueError:
+                    print("错误：请输入有效的正整数")
+
+        print(f"\n所有需求点的需求量设置完成：")
+        total_demand = 0
+        for i, (centroid_id, _) in enumerate(self.region_centroid_nodes):
+            demand = self.demand_quantities.get(centroid_id, 0)
+            print(f"需求点 {i + 1} (Node {centroid_id}): {demand}")
+            total_demand += demand
+        print(f"总需求量: {total_demand}")
+
     def display_selected_network(self):
         def count_crossings(line, arterial_lines):
             crossings = 0
@@ -1361,6 +1403,79 @@ class RoadNetworkSelector:
         self.selected_path_nodes = selected_path_nodes
         self.draw_map()
         print("已撤销上一步操作")
+
+    def run_optimization(self, event):
+        """运行双目标遗传算法优化"""
+        # 检查必要条件
+        if not hasattr(self, 'region_centroid_nodes') or not self.region_centroid_nodes:
+            print("错误：没有找到需求点，请先完成选择")
+            return
+
+        if not self.gathering_points:
+            print("错误：没有选择集合点，请先选择集合点")
+            return
+
+        if not hasattr(self, 'distance_matrix') or self.distance_matrix is None:
+            print("错误：没有计算距离矩阵，请先计算距离")
+            return
+
+        if not hasattr(self, 'demand_quantities') or not self.demand_quantities:
+            print("错误：没有输入需求量，请先输入需求量")
+            return
+
+        try:
+            # 导入并运行遗传算法
+            from genetic_algorithm import run_optimization
+
+            print("\n" + "=" * 60)
+            print("开始运行双目标遗传算法优化")
+            print("=" * 60)
+
+            ga, solutions = run_optimization(self)
+
+            if ga and solutions:
+                print(f"\n优化完成！找到 {len(solutions)} 个帕累托最优解")
+
+                # 询问是否应用某个解
+                if len(solutions) > 0:
+                    print("\n可用的帕累托最优解:")
+                    for i, sol in enumerate(solutions[:5]):  # 只显示前5个
+                        print(f"解 {i + 1}: 距离={sol['objectives'][0]:.1f}, 穿越={sol['objectives'][1]:.1f}")
+
+                    try:
+                        choice = input(f"\n请选择要应用的解 (1-{min(len(solutions), 5)}, 或按回车跳过): ")
+                        if choice.strip():
+                            sol_idx = int(choice) - 1
+                            if 0 <= sol_idx < len(solutions):
+                                self.apply_solution(solutions[sol_idx])
+                    except:
+                        print("无效选择，跳过应用解")
+
+        except ImportError:
+            print("错误：无法导入遗传算法模块，请确保 genetic_algorithm.py 文件存在")
+        except Exception as e:
+            print(f"优化过程中出现错误: {e}")
+
+    def apply_solution(self, solution):
+        """应用优化解到可视化"""
+        assignment = solution['assignment']
+
+        print(f"\n应用解决方案:")
+        print(f"总距离: {solution['objectives'][0]:.1f} 人·米")
+        print(f"总穿越: {solution['objectives'][1]:.1f} 人·次")
+
+        # 显示分配详情
+        print("\n分配详情:")
+        for i in range(len(assignment)):
+            j = assignment[i]
+            if j != -1:
+                demand_node = self.region_centroid_nodes[i][0]
+                gathering_node = list(self.gathering_points)[j]
+                demand = self.demand_quantities.get(demand_node, 0)
+                distance = self.distance_matrix.loc[demand_node, gathering_node]
+
+                print(f"需求点 {i + 1} (Node {demand_node}, 需求 {demand}) -> "
+                      f"集合点 {j + 1} (Node {gathering_node}) : {distance:.1f}m")
 
 if __name__ == "__main__":
     selector = RoadNetworkSelector(
