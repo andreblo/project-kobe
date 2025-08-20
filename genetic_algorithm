@@ -19,7 +19,8 @@ class MultiObjectiveGA:
                  max_generations: int = 200,
                  crossover_rate: float = 0.8,
                  mutation_rate: float = 0.1,
-                 dmax: float = 1500.0):
+                 dmax: float = 1500,
+                 use_dynamic_dmax: bool = True):
         """
         初始化遗传算法
 
@@ -37,6 +38,8 @@ class MultiObjectiveGA:
         self.crossover_rate = crossover_rate
         self.mutation_rate = mutation_rate
         self.dmax = dmax
+        self.use_dynamic_dmax = use_dynamic_dmax  # 新增
+        self.dynamic_dmax = dmax  # 新增：动态距离限制值
 
         # 提取问题数据
         self._extract_problem_data()
@@ -88,7 +91,7 @@ class MultiObjectiveGA:
         self.capacities = np.array([self.road_network.gathering_point_capacities.get(node, 0)
                                     for node in self.gathering_nodes])
 
-        # 提取距离矩阵
+        # 提取距离矩阵（先用原始dmax）
         distance_df = self.road_network.distance_matrix
         self.distance_matrix = np.full((self.num_demands, self.num_gathering), np.inf)
         for i, demand_node in enumerate(self.demand_nodes):
@@ -97,6 +100,24 @@ class MultiObjectiveGA:
                     distance = distance_df.loc[demand_node, gathering_node]
                     if not np.isinf(distance) and distance <= self.dmax:
                         self.distance_matrix[i, j] = distance
+
+        # 计算动态距离限制
+        if self.use_dynamic_dmax:
+            self.dynamic_dmax = self.calculate_dynamic_dmax()
+
+            # 重新构建距离矩阵（使用动态dmax）
+            self.distance_matrix = np.full((self.num_demands, self.num_gathering), np.inf)
+            for i, demand_node in enumerate(self.demand_nodes):
+                for j, gathering_node in enumerate(self.gathering_nodes):
+                    if demand_node in distance_df.index and gathering_node in distance_df.columns:
+                        distance = distance_df.loc[demand_node, gathering_node]
+                        if not np.isinf(distance) and distance <= self.dynamic_dmax:
+                            self.distance_matrix[i, j] = distance
+
+            print(f"使用动态距离限制重构距离矩阵完成")
+        else:
+            self.dynamic_dmax = self.dmax
+            print(f"使用固定距离限制: {self.dmax:.1f}米")
 
         # 提取穿越次数矩阵
         self.crossing_matrix = self._get_crossing_matrix()
@@ -107,6 +128,57 @@ class MultiObjectiveGA:
         print(f"  容量: {self.capacities}")
         print(f"  总需求量: {np.sum(self.demands)}")
         print(f"  总容量: {np.sum(self.capacities)}")
+
+    def calculate_dynamic_dmax(self):
+        """根据路网特征动态计算最大距离限制"""
+        if self.distance_matrix is None:
+            print("警告：距离矩阵为空，使用固定dmax值")
+            return self.dmax
+
+        # 获取所有有效距离
+        valid_distances = []
+        for i in range(self.num_demands):
+            for j in range(self.num_gathering):
+                dist = self.distance_matrix[i, j]
+                if not np.isinf(dist) and not np.isnan(dist):
+                    valid_distances.append(dist)
+
+        if not valid_distances:
+            print("警告：没有找到有效距离，使用固定dmax值")
+            return self.dmax
+
+        valid_distances = np.array(valid_distances)
+
+        # 计算统计量
+        mean_dist = np.mean(valid_distances)
+        std_dist = np.std(valid_distances)
+        percentile_90 = np.percentile(valid_distances, 90)
+        percentile_75 = np.percentile(valid_distances, 75)
+
+        # 动态计算dmax（使用多种策略的最小值）
+        strategy_1 = mean_dist + 1.5 * std_dist  # 统计学方法
+        strategy_2 = percentile_90  # 90分位数方法
+        strategy_3 = percentile_75 * 1.3  # 75分位数*1.3
+        strategy_4 = self.dmax * 1.2  # 不超过原限制的1.2倍
+
+        dynamic_dmax = min(strategy_1, strategy_2, strategy_3, strategy_4)
+
+        # 确保不小于最短距离的1.5倍
+        min_dist = np.min(valid_distances)
+        dynamic_dmax = max(dynamic_dmax, min_dist * 1.5)
+
+        print(f"动态距离限制计算结果:")
+        print(f"  平均距离: {mean_dist:.1f}米")
+        print(f"  标准差: {std_dist:.1f}米")
+        print(f"  90分位数: {percentile_90:.1f}米")
+        print(f"  75分位数: {percentile_75:.1f}米")
+        print(f"  策略1(均值+1.5σ): {strategy_1:.1f}米")
+        print(f"  策略2(90分位数): {strategy_2:.1f}米")
+        print(f"  策略3(75分位数*1.3): {strategy_3:.1f}米")
+        print(f"  策略4(原限制*1.2): {strategy_4:.1f}米")
+        print(f"  最终动态dmax: {dynamic_dmax:.1f}米 (原固定值: {self.dmax:.1f}米)")
+
+        return dynamic_dmax
 
     def _get_crossing_matrix(self):
         """获取穿越次数矩阵"""
@@ -136,7 +208,7 @@ class MultiObjectiveGA:
         # 检查距离约束
         for i in range(self.num_demands):
             j = assignment[i]
-            if j != -1 and self.distance_matrix[i, j] > self.dmax:
+            if j != -1 and self.distance_matrix[i, j] > self.dynamic_dmax:
                 return False
 
         return True
@@ -161,7 +233,7 @@ class MultiObjectiveGA:
                 feasible_gatherings = []
                 for j in range(self.num_gathering):
                     # 检查距离约束
-                    if self.distance_matrix[i, j] <= self.dmax:
+                    if self.distance_matrix[i, j] <= self.dynamic_dmax:
                         # 检查容量约束
                         current_load = np.sum(self.demands[assignment == j])
                         if current_load + self.demands[i] <= self.capacities[j]:
@@ -199,7 +271,7 @@ class MultiObjectiveGA:
             best_cost = np.inf
             for j in range(self.num_gathering):
                 # 检查约束
-                if (self.distance_matrix[i, j] <= self.dmax and
+                if (self.distance_matrix[i, j] <= self.dynamic_dmax and
                         np.sum(self.demands[assignment == j]) + self.demands[i] <= self.capacities[j]):
 
                     # 计算成本（距离 + 穿越次数的加权和）
@@ -380,7 +452,7 @@ class MultiObjectiveGA:
         # 找到可行的集合点
         feasible_gatherings = []
         for j in range(self.num_gathering):
-            if j != mutated[i] and self.distance_matrix[i, j] <= self.dmax:
+            if j != mutated[i] and self.distance_matrix[i, j] <= self.dynamic_dmax:
                 # 检查容量约束
                 current_load = np.sum(self.demands[mutated == j])
                 if current_load + self.demands[i] <= self.capacities[j]:
@@ -419,7 +491,7 @@ class MultiObjectiveGA:
     def _find_feasible_gathering(self, demand_idx: int, current_assignment: np.ndarray) -> int:
         """为需求点找到可行的集合点"""
         for j in range(self.num_gathering):
-            if (self.distance_matrix[demand_idx, j] <= self.dmax and
+            if (self.distance_matrix[demand_idx, j] <= self.dynamic_dmax and
                     np.sum(self.demands[current_assignment == j]) + self.demands[demand_idx] <= self.capacities[j]):
                 return j
         return -1  # 无可行分配
@@ -551,7 +623,14 @@ class MultiObjectiveGA:
 
         end_time = time.time()
         runtime = end_time - start_time
-
+        print(f"\n距离限制使用情况:")
+        if self.use_dynamic_dmax:
+            print(f"  使用动态距离限制: {self.dynamic_dmax:.1f}米")
+            print(f"  原始固定限制: {self.dmax:.1f}米")
+            improvement = (self.dynamic_dmax - self.dmax) / self.dmax * 100
+            print(f"  调整幅度: {improvement:+.1f}%")
+        else:
+            print(f"  使用固定距离限制: {self.dmax:.1f}米")
         print(f"\n算法运行完成，耗时 {runtime:.2f} 秒")
         print(f"最终帕累托前沿包含 {len(self.pareto_front)} 个解")
 
@@ -610,15 +689,15 @@ class MultiObjectiveGA:
                 j = assignment[i]
                 if j != -1:
                     allocation_data.append([
-                        f"需求点 {i + 1}",
-                        f"集合点 {j + 1}",
+                        f"Demand point {i + 1}",
+                        f"Gathering point {j + 1}",
                         self.demands[i],
                         f"{self.distance_matrix[i, j]:.1f}",
                         f"{self.crossing_matrix[i, j]:.0f}"
                     ])
 
             df = pd.DataFrame(allocation_data,
-                              columns=['NPs', 'GPs', 'Demands(people)', 'Distance(m)', 'Crossing times'])
+                              columns=['DPs', 'GPs', 'Demands(people)', 'Distance(m)', 'Crossing times'])
 
             # 显示表格
             ax4.axis('tight')
@@ -689,7 +768,8 @@ def run_optimization(road_network_selector):
             max_generations=200,
             crossover_rate=0.8,
             mutation_rate=0.1,
-            dmax=1500
+            dmax=1500,
+            use_dynamic_dmax = True  # 启用动态距离限制
         )
 
         # 运行算法
