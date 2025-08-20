@@ -7,7 +7,6 @@ import pandas as pd
 from typing import List, Tuple, Dict, Optional
 import time
 
-
 class MultiObjectiveGA:
     """
     双目标遗传算法求解疏散路径优化问题
@@ -15,13 +14,12 @@ class MultiObjectiveGA:
     目标1: 最小化总步行距离（需求量 × 距离）
     目标2: 最小化总穿越次数（需求量 × 穿越次数）
     """
-
     def __init__(self, road_network,
                  population_size: int = 100,
                  max_generations: int = 200,
                  crossover_rate: float = 0.8,
                  mutation_rate: float = 0.1,
-                 dmax: float = 1000.0):
+                 dmax: float = 1500.0):
         """
         初始化遗传算法
 
@@ -53,7 +51,6 @@ class MultiObjectiveGA:
             'pareto_size': [],
             'generation': []
         }
-
         print(f"双目标遗传算法初始化完成")
         print(f"需求点数量: {self.num_demands}")
         print(f"集合点数量: {self.num_gathering}")
@@ -94,7 +91,6 @@ class MultiObjectiveGA:
         # 提取距离矩阵
         distance_df = self.road_network.distance_matrix
         self.distance_matrix = np.full((self.num_demands, self.num_gathering), np.inf)
-
         for i, demand_node in enumerate(self.demand_nodes):
             for j, gathering_node in enumerate(self.gathering_nodes):
                 if demand_node in distance_df.index and gathering_node in distance_df.columns:
@@ -104,7 +100,6 @@ class MultiObjectiveGA:
 
         # 提取穿越次数矩阵
         self.crossing_matrix = self._get_crossing_matrix()
-
         print(f"问题数据提取完成:")
         print(f"  需求点: {self.demand_nodes}")
         print(f"  集合点: {self.gathering_nodes}")
@@ -202,7 +197,6 @@ class MultiObjectiveGA:
         for i in demand_order:
             best_j = -1
             best_cost = np.inf
-
             for j in range(self.num_gathering):
                 # 检查约束
                 if (self.distance_matrix[i, j] <= self.dmax and
@@ -231,7 +225,6 @@ class MultiObjectiveGA:
         """
         total_distance = 0.0
         total_crossings = 0.0
-
         for i in range(self.num_demands):
             j = assignment[i]
             if j != -1:
@@ -282,7 +275,6 @@ class MultiObjectiveGA:
         for i, individual_i in enumerate(self.population):
             individual_i['domination_count'] = 0
             individual_i['dominated_solutions'] = []
-
             for j, individual_j in enumerate(self.population):
                 if i != j:
                     if self._dominates(individual_i['objectives'], individual_j['objectives']):
@@ -306,7 +298,7 @@ class MultiObjectiveGA:
             i += 1
             fronts.append(next_front)
 
-        return fronts[:-1]  # 移除最后一个空前沿
+        return fronts[:-1]
 
     def _calculate_crowding_distance(self, front: List[int]):
         """计算拥挤度距离"""
@@ -580,26 +572,26 @@ class MultiObjectiveGA:
         obj2_values = [obj[1] for obj in objectives]
 
         ax1.scatter(obj1_values, obj2_values, c='red', s=50, alpha=0.7)
-        ax1.set_xlabel('总步行距离 (人·米)')
-        ax1.set_ylabel('总穿越次数 (人·次)')
-        ax1.set_title('帕累托前沿')
+        ax1.set_xlabel('Total distance (p·m)')
+        ax1.set_ylabel('Total crossing times (p·times)')
+        ax1.set_title('Pareto front')
         ax1.grid(True, alpha=0.3)
 
         # 2. 收敛历史
-        ax2.plot(self.history['generation'], self.history['best_obj1'], 'b-', label='最佳距离')
+        ax2.plot(self.history['generation'], self.history['best_obj1'], 'b-', label='Best distance')
         ax2_twin = ax2.twinx()
-        ax2_twin.plot(self.history['generation'], self.history['best_obj2'], 'r-', label='最佳穿越')
-        ax2.set_xlabel('迭代次数')
-        ax2.set_ylabel('最佳距离', color='b')
-        ax2_twin.set_ylabel('最佳穿越', color='r')
-        ax2.set_title('收敛历史')
+        ax2_twin.plot(self.history['generation'], self.history['best_obj2'], 'r-', label='Best crossing')
+        ax2.set_xlabel('Iteration count')  # 迭代次数
+        ax2.set_ylabel('Best distance', color='b')
+        ax2_twin.set_ylabel('Best crossing', color='r')
+        ax2.set_title('Convergence history')  # 收敛历史
         ax2.grid(True, alpha=0.3)
 
         # 3. 帕累托前沿大小变化
         ax3.plot(self.history['generation'], self.history['pareto_size'], 'g-')
-        ax3.set_xlabel('迭代次数')
-        ax3.set_ylabel('帕累托前沿大小')
-        ax3.set_title('帕累托前沿大小变化')
+        ax3.set_xlabel('Iteration count')
+        ax3.set_ylabel('Pareto front size')
+        ax3.set_title('Pareto front size changes')
         ax3.grid(True, alpha=0.3)
 
         # 4. 分配方案示例（选择一个代表性解）
@@ -609,7 +601,6 @@ class MultiObjectiveGA:
             normalized_obj2 = np.array(obj2_values) / max(obj2_values)
             distances = np.sqrt(normalized_obj1 ** 2 + normalized_obj2 ** 2)
             best_idx = np.argmin(distances)
-
             best_solution = self.pareto_front[best_idx]
             assignment = best_solution['assignment']
 
@@ -627,7 +618,7 @@ class MultiObjectiveGA:
                     ])
 
             df = pd.DataFrame(allocation_data,
-                              columns=['需求点', '集合点', '需求量', '距离(m)', '穿越次数'])
+                              columns=['NPs', 'GPs', 'Demands(people)', 'Distance(m)', 'Crossing times'])
 
             # 显示表格
             ax4.axis('tight')
@@ -640,7 +631,7 @@ class MultiObjectiveGA:
             table.set_fontsize(9)
             table.scale(1.2, 1.5)
             ax4.set_title(
-                f'最佳平衡解分配方案\n距离: {best_solution["objectives"][0]:.1f}, 穿越: {best_solution["objectives"][1]:.1f}')
+                f'Best arrangement:\nDistance: {best_solution["objectives"][0]:.1f}, Crossing: {best_solution["objectives"][1]:.1f}')
 
         plt.tight_layout()
         plt.show()
@@ -668,7 +659,6 @@ class MultiObjectiveGA:
                 utilization.append(util_rate)
 
             avg_utilization = np.mean(utilization)
-
             results.append({
                 'solution_id': idx + 1,
                 'total_distance': obj1,
@@ -695,11 +685,11 @@ def run_optimization(road_network_selector):
         # 创建遗传算法实例
         ga = MultiObjectiveGA(
             road_network=road_network_selector,
-            population_size=50,  # 可以根据需要调整
-            max_generations=100,  # 可以根据需要调整
+            population_size=100,
+            max_generations=200,
             crossover_rate=0.8,
             mutation_rate=0.1,
-            dmax=1000.0
+            dmax=1500
         )
 
         # 运行算法
