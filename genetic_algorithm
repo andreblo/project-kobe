@@ -285,6 +285,49 @@ class MultiObjectiveGA:
 
         return assignment
 
+  # def _generate_distance_first_individual(self):  # 添加的新方法
+   # """强化的距离优先策略"""
+   # assignment = np.full(self.num_demands, -1)
+   # demand_order = np.argsort(self.demands)
+   # for i in demand_order:
+       # best_j = -1
+       # best_distance = np.inf
+
+       # for j in range(self.num_gathering):
+           # if (self.distance_matrix[i, j] <= self.dynamic_dmax and
+                   # np.sum(self.demands[assignment == j]) + self.demands[i] <= self.capacities[j]):
+               # if self.distance_matrix[i, j] < best_distance:
+                   # best_distance = self.distance_matrix[i, j]
+                   # best_j = j
+
+       # if best_j != -1:
+           # assignment[i] = best_j
+
+   # return assignment
+   # def _generate_crossing_first_individual(self):  # 添加的新方法
+       # """轻量化穿越策略：在距离可接受的前提下考虑穿越"""
+       # assignment = np.full(self.num_demands, -1)
+       # for i in range(self.num_demands):
+           # best_j = -1
+           # best_score = np.inf
+
+           # for j in range(self.num_gathering):
+               # if (self.distance_matrix[i, j] <= self.dynamic_dmax and
+                       # np.sum(self.demands[assignment == j]) + self.demands[i] <= self.capacities[j]):
+                    # 主要看距离，穿越作为次要因素
+                   # distance_score = self.distance_matrix[i, j]
+                   # crossing_score = self.crossing_matrix[i, j] * 50  # 降低穿越权重
+                   # total_score = distance_score + crossing_score
+
+                   # if total_score < best_score:
+                       # best_score = total_score
+                       # best_j = j
+
+           # if best_j != -1:
+               # assignment[i] = best_j
+
+       # return assignment
+
     def _calculate_objectives(self, assignment: np.ndarray) -> Tuple[float, float]:
         """
         计算目标函数值
@@ -327,7 +370,6 @@ class MultiObjectiveGA:
         for i in range(self.population_size):
             if i % 20 == 0:
                 print(f"  生成个体 {i + 1}/{self.population_size}")
-
             assignment = self._generate_random_individual()
             objectives = self._calculate_objectives(assignment)
 
@@ -339,6 +381,29 @@ class MultiObjectiveGA:
             })
 
         print(f"种群初始化完成，共 {len(self.population)} 个个体")
+
+    # def _initialize_population_enhanced(self):  # 替换原来的initialize
+       # """在初始化种群的阶段里，优先考虑到距离，其次是穿越次数，而非完全随机"""
+       # print("正在初始化种群...")
+       # self.population = []
+       # for i in range(self.population_size):
+          #  if i % 20 == 0:
+              #  print(f"  生成个体 {i + 1}/{self.population_size}")
+           # if i < self.population_size * 0.3:  # 30%随机
+               # assignment = self._generate_random_individual()
+           # elif i < self.population_size * 0.7:  # 40%距离优先（大幅增加）
+               # assignment = self._generate_distance_first_individual()
+           # else:  # 30%穿越优先
+               # assignment = self._generate_crossing_first_individual()
+
+           # objectives = self._calculate_objectives(assignment)
+           # self.population.append({
+               # 'assignment': assignment,
+               # 'objectives': objectives,
+               # 'rank': 0,
+               # 'crowding_distance': 0.0
+           # })
+      #  print(f"种群初始化完成，距离优先策略占40%")
 
     def _fast_non_dominated_sort(self):
         """快速非支配排序"""
@@ -405,9 +470,8 @@ class MultiObjectiveGA:
 
     def _tournament_selection(self) -> int:
         """锦标赛选择"""
-        tournament_size = 2
+        tournament_size = 2  # 二元锦标赛
         tournament = random.sample(range(len(self.population)), tournament_size)
-
         best = tournament[0]
         for i in tournament[1:]:
             # 比较等级
@@ -420,20 +484,22 @@ class MultiObjectiveGA:
         return best
 
     def _crossover(self, parent1: np.ndarray, parent2: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """交叉操作"""
+        """二点交叉操作"""
         if random.random() > self.crossover_rate:
             return parent1.copy(), parent2.copy()
 
-        # 单点交叉
-        crossover_point = random.randint(1, self.num_demands - 1)
+        # 二点交叉
+        point1 = random.randint(1, self.num_demands - 2)
+        point2 = random.randint(point1 + 1, self.num_demands - 1)
 
         child1 = parent1.copy()
         child2 = parent2.copy()
 
-        child1[crossover_point:] = parent2[crossover_point:]
-        child2[crossover_point:] = parent1[crossover_point:]
+        # 中間部分を交換
+        child1[point1:point2] = parent2[point1:point2]
+        child2[point1:point2] = parent1[point1:point2]
 
-        # 修复不可行解
+        # 修復不可行解
         child1 = self._repair_individual(child1)
         child2 = self._repair_individual(child2)
 
@@ -769,7 +835,7 @@ def run_optimization(road_network_selector):
             crossover_rate=0.8,
             mutation_rate=0.1,
             dmax=1500,
-            use_dynamic_dmax = True  # 启用动态距离限制
+            use_dynamic_dmax=True  # 启用动态距离限制
         )
 
         # 运行算法
