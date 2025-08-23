@@ -285,49 +285,6 @@ class MultiObjectiveGA:
 
         return assignment
 
-  # def _generate_distance_first_individual(self):  # 添加的新方法
-   # """强化的距离优先策略"""
-   # assignment = np.full(self.num_demands, -1)
-   # demand_order = np.argsort(self.demands)
-   # for i in demand_order:
-       # best_j = -1
-       # best_distance = np.inf
-
-       # for j in range(self.num_gathering):
-           # if (self.distance_matrix[i, j] <= self.dynamic_dmax and
-                   # np.sum(self.demands[assignment == j]) + self.demands[i] <= self.capacities[j]):
-               # if self.distance_matrix[i, j] < best_distance:
-                   # best_distance = self.distance_matrix[i, j]
-                   # best_j = j
-
-       # if best_j != -1:
-           # assignment[i] = best_j
-
-   # return assignment
-   # def _generate_crossing_first_individual(self):  # 添加的新方法
-       # """轻量化穿越策略：在距离可接受的前提下考虑穿越"""
-       # assignment = np.full(self.num_demands, -1)
-       # for i in range(self.num_demands):
-           # best_j = -1
-           # best_score = np.inf
-
-           # for j in range(self.num_gathering):
-               # if (self.distance_matrix[i, j] <= self.dynamic_dmax and
-                       # np.sum(self.demands[assignment == j]) + self.demands[i] <= self.capacities[j]):
-                    # 主要看距离，穿越作为次要因素
-                   # distance_score = self.distance_matrix[i, j]
-                   # crossing_score = self.crossing_matrix[i, j] * 50  # 降低穿越权重
-                   # total_score = distance_score + crossing_score
-
-                   # if total_score < best_score:
-                       # best_score = total_score
-                       # best_j = j
-
-           # if best_j != -1:
-               # assignment[i] = best_j
-
-       # return assignment
-
     def _calculate_objectives(self, assignment: np.ndarray) -> Tuple[float, float]:
         """
         计算目标函数值
@@ -381,29 +338,6 @@ class MultiObjectiveGA:
             })
 
         print(f"种群初始化完成，共 {len(self.population)} 个个体")
-
-    # def _initialize_population_enhanced(self):  # 替换原来的initialize
-       # """在初始化种群的阶段里，优先考虑到距离，其次是穿越次数，而非完全随机"""
-       # print("正在初始化种群...")
-       # self.population = []
-       # for i in range(self.population_size):
-          #  if i % 20 == 0:
-              #  print(f"  生成个体 {i + 1}/{self.population_size}")
-           # if i < self.population_size * 0.3:  # 30%随机
-               # assignment = self._generate_random_individual()
-           # elif i < self.population_size * 0.7:  # 40%距离优先（大幅增加）
-               # assignment = self._generate_distance_first_individual()
-           # else:  # 30%穿越优先
-               # assignment = self._generate_crossing_first_individual()
-
-           # objectives = self._calculate_objectives(assignment)
-           # self.population.append({
-               # 'assignment': assignment,
-               # 'objectives': objectives,
-               # 'rank': 0,
-               # 'crowding_distance': 0.0
-           # })
-      #  print(f"种群初始化完成，距离优先策略占40%")
 
     def _fast_non_dominated_sort(self):
         """快速非支配排序"""
